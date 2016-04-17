@@ -11,9 +11,8 @@ package session;
 
 import java.util.Map;
 
-import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+//import org.slf4j.Logger;
+//import org.slf4j.LoggerFactory;
 
 import com.amazon.speech.slu.Intent;
 import com.amazon.speech.slu.Slot;
@@ -25,44 +24,43 @@ import com.amazon.speech.speechlet.SessionStartedRequest;
 import com.amazon.speech.speechlet.Speechlet;
 import com.amazon.speech.speechlet.SpeechletException;
 import com.amazon.speech.speechlet.SpeechletResponse;
+import com.amazon.speech.ui.Card;
+import com.amazon.speech.ui.Image;
 import com.amazon.speech.ui.PlainTextOutputSpeech;
 import com.amazon.speech.ui.Reprompt;
 import com.amazon.speech.ui.SimpleCard;
+import com.amazon.speech.ui.StandardCard;
 import com.omertron.omdbapi.OMDBException;
 import com.omertron.omdbapi.OmdbApi;
 import com.omertron.omdbapi.model.OmdbVideoFull;
 import com.omertron.omdbapi.tools.OmdbBuilder;
 
 public class SessionSpeechlet implements Speechlet {
-    private static final Logger log = LoggerFactory.getLogger(SessionSpeechlet.class);
 
     private static final String MOVIE_NAME_SLOT = "MovieName";
-    private static final String[] movieNameWords = {"FirstWord", "SecondWord", "ThirdWord",
-            "FourthWord", "FifthWord","SixthWord", "SeventhWord"};
-    private static final String MOVIE_NAME_FIRST_WORD = "MovieNameFirstWord";
-    private static final String MOVIE_NAME_SECOND_WORD = "MovieNameSecondWord";
+    private static final String SKILL_TITLE = "BoxOffice";
 
     @Override
     public void onSessionStarted(final SessionStartedRequest request, final Session session)
             throws SpeechletException {
-        log.info("onSessionStarted requestId={}, sessionId={}", request.getRequestId(),
-                session.getSessionId());
+//        log.info("onSessionStarted requestId={}, sessionId={}", request.getRequestId(),
+//                session.getSessionId());
         // any initialization logic goes here
     }
 
     @Override
     public SpeechletResponse onLaunch(final LaunchRequest request, final Session session)
             throws SpeechletException {
-        log.info("onLaunch requestId={}, sessionId={}", request.getRequestId(),
-                session.getSessionId());
+//        log.info("onLaunch requestId={}, sessionId={}", request.getRequestId(),
+//                session.getSessionId());
         return getWelcomeResponse();
     }
 
     @Override
     public SpeechletResponse onIntent(final IntentRequest request, final Session session)
             throws SpeechletException {
-        log.info("onIntent requestId={}, sessionId={}", request.getRequestId(),
-                session.getSessionId());
+//        log.info("onIntent requestId={}, sessionId={}", request.getRequestId(),
+//                session.getSessionId());
 
         // Get intent from the request object.
         Intent intent = request.getIntent();
@@ -79,8 +77,11 @@ public class SessionSpeechlet implements Speechlet {
         else if ("AMAZON.StopIntent".equals(intentName) || "AMAZON.CancelIntent".equals(intentName)) {
             return getGoodByResponse();
         }
-        else if ("MovieCastIntent".equals(intentName)) {
+        else if ("WhatsMovieCastIntent".equals(intentName)) {
             return getCastInformation(intent, session);
+        }
+        else if ("WhatsPlayingIntent".equals(intentName)) {
+            return getMoviesInTheater(intent, session);
         }
         else {
             throw new SpeechletException("Invalid Intent");
@@ -90,8 +91,8 @@ public class SessionSpeechlet implements Speechlet {
     @Override
     public void onSessionEnded(final SessionEndedRequest request, final Session session)
             throws SpeechletException {
-        log.info("onSessionEnded requestId={}, sessionId={}", request.getRequestId(),
-                session.getSessionId());
+//        log.info("onSessionEnded requestId={}, sessionId={}", request.getRequestId(),
+//                session.getSessionId());
         // any cleanup logic goes here
     }
 
@@ -139,21 +140,35 @@ public class SessionSpeechlet implements Speechlet {
      * @return SpeechletResponse spoken and visual response for the intent
      */
     private SpeechletResponse getMovieRating(final Intent intent, final Session session) {
-        // Get the slots from the intent.
-        Map<String, Slot> slots = intent.getSlots();
         int success = 0;
         boolean isAskResponse = false;
-        // String strMovieName = movieName.toString().trim();
 
-        Slot movieNameSlot = slots.get(MOVIE_NAME_SLOT);
         String speechText = "Movie rating of ";
+        String movieName = getMovieName(intent);
+        String posterUrl = null;
 
+        if (!movieName.isEmpty()) {
+            System.out.println("Movie name " + movieName);
+            try {
+                speechText += movieName + " is ";
+                OmdbVideoFull omdbVideoFull = getMovieInfoFromOmdb(movieName);
+                System.out.println("OmdbVideoFull "+ omdbVideoFull);
 
-        if (movieNameSlot != null && movieNameSlot.getValue() != null) {
-            String strMovieName = movieNameSlot.getValue();
-            System.out.println("Movie name " + strMovieName);
-            speechText += strMovieName + " is " + getMovieInfoFromOmdb(strMovieName);
-            success = 1;
+                posterUrl = omdbVideoFull.getPoster();
+                String imdbRating = getImdbRating(omdbVideoFull);
+                if ( !imdbRating.isEmpty()) {
+                    speechText += imdbRating + " from IMDB";
+                }
+
+                String rottenTomatoRating = getRottenTomatoRating(omdbVideoFull);
+                if ( !rottenTomatoRating.isEmpty()) {
+                    speechText +=  rottenTomatoRating + " from Rotten Tomato.";
+                }
+                success = 1;
+            } catch (OMDBException e) {
+                speechText += "not available";
+                e.printStackTrace();
+            }
         } else {
             // Render an error since we don't know what the users movie name is.
             speechText = "I didn't get your movie name, please try again";
@@ -162,40 +177,139 @@ public class SessionSpeechlet implements Speechlet {
         String repromptText =
                 "You can ask me movie rating by saying, what's movie rating of Titanic?";
         System.out.println("getMovieRating_Success=" + success);
-        return getSpeechletResponse(speechText, repromptText, isAskResponse);
+        return getSpeechletResponse(speechText, repromptText, posterUrl, isAskResponse);
+    }
+
+    private String getImdbRating(OmdbVideoFull movieInformation) {
+        String imdbRating = "";
+        int success = 0;
+        try {
+            imdbRating = movieInformation.getImdbRating();
+            success = 1;
+        }
+        catch (Exception e) {
+            System.out.println("Failed to get IMDB rating " + e);
+        }
+        finally {
+            System.out.println("getImdbRating_Success="+ success);
+        }
+        return imdbRating;
+    }
+
+    private String getRottenTomatoRating(OmdbVideoFull movieInformation) {
+        String rottenTomatoRating = "";
+        int success = 0;
+        try {
+            rottenTomatoRating = movieInformation.getTomatoRating();
+            System.out.println("Rotten tomato rating = " + rottenTomatoRating);
+            success = 1;
+        }
+        catch (Exception e) {
+            System.out.println("Failed to get RottenTomato"+ e);
+        }
+        finally {
+            System.out.println("getRottenTomatoRating_Success=" + success);
+        }
+        return rottenTomatoRating;
     }
 
     private SpeechletResponse getCastInformation(final Intent intent, final Session session) {
-        
+        String speechText = "";
+        String repromptText = "";
+        boolean isAskResponse = false;
+        int success = 0;
+        String movieName = getMovieName(intent);
+        if (!movieName.isEmpty()) {
+            try {
+                speechText = getMovieInfoFromOmdb(movieName).getActors();
+                success = 1;
+            } catch (OMDBException e) {
+                speechText = "Actors list is not available.";
+            }
+        }
+        System.out.println("getCastInformation_Success=" + success);
+        return getSpeechletResponse(speechText, repromptText, isAskResponse);
+
     }
 
-    private String getMovieInfoFromOmdb(String movieName) {
+    private OmdbVideoFull getMovieInfoFromOmdb(String movieName) throws OMDBException {
         int success = 0;
-        String rating = "not available.";
         OmdbApi omdb = new OmdbApi();
+        OmdbVideoFull result;
         try {
-            OmdbVideoFull result = omdb.getInfo(new OmdbBuilder().setTitle(movieName).build());
-            rating = result.getImdbRating() + " after " + result.getImdbVotes() + " votes.";
+            result = omdb.getInfo(new OmdbBuilder().setTitle(movieName).build());
             success = 1;
         } catch (OMDBException e) {
             System.err.println("OMDB Exception for movie name " + movieName);
-            e.printStackTrace();
+            throw e;
         } finally {
-            System.out.println("getMovieInfoFromOmdb_Success" + success);
+            System.out.println("getMovieInfoFromOmdb_Success=" + success);
         }
+        return result;
+    }
 
-        return rating;
+    private String getMovieName(final Intent intent) {
+        // Get the slots from the intent.
+        Map<String, Slot> slots = intent.getSlots();
+        int success = 0;
+        String movieName = "";
+        Slot movieNameSlot = slots.get(MOVIE_NAME_SLOT);
+        if (movieNameSlot != null && movieNameSlot.getValue() != null) {
+            movieName = movieNameSlot.getValue();
+            success = 1;
+        }
+        System.out.println("getMovieName_Success=" + success);
+        return movieName;
+    }
+
+    private SpeechletResponse getMoviesInTheater(final Intent intent, final Session session) {
+        String speechText = "Developer is still working on this feature. Coming soon";
+        String repromptText = "";
+        boolean isAskResponse = false;
+        int success = 1;
+
+        System.out.println("getMoviesInTheater_Success=" + success);
+        return getSpeechletResponse(speechText, repromptText, isAskResponse);
+
+    }
+
+    private Image createPoster(String posterUrl) {
+        Image poster = new Image();
+        poster.setSmallImageUrl(posterUrl.replace("http://", "https://"));
+        return poster;
+    }
+
+    private Card createCardWithoutPoster(String speechText) {
+        SimpleCard card = new SimpleCard();
+        card.setTitle(SKILL_TITLE);
+        card.setContent(speechText);
+        return card;
+    }
+
+    private Card createCardWithPoster(String speechText, String posterUrl) {
+        StandardCard card = new StandardCard();
+        card.setTitle(SKILL_TITLE);
+        card.setText(speechText);
+        Image poster = createPoster(posterUrl);
+        if (poster != null) {
+            card.setImage(poster);
+        }
+        return card;
+    }
+
+    private Card createCard(String speechText, String posterUrl) {
+        if (posterUrl != null && !posterUrl.isEmpty()) {
+            return createCardWithPoster(speechText, posterUrl);
+        } else {
+            return createCardWithoutPoster(speechText);
+        }
     }
 
     /**
      * Returns a Speechlet response for a speech and reprompt text.
      */
-    private SpeechletResponse getSpeechletResponse(String speechText, String repromptText,
+    private SpeechletResponse getSpeechletResponse(String speechText, String repromptText, String posterUrl,
             boolean isAskResponse) {
-        // Create the Simple card content.
-        SimpleCard card = new SimpleCard();
-        card.setTitle("BoxOffice");
-        card.setContent(speechText);
 
         // Create the plain text output.
         PlainTextOutputSpeech speech = new PlainTextOutputSpeech();
@@ -208,10 +322,16 @@ public class SessionSpeechlet implements Speechlet {
             Reprompt reprompt = new Reprompt();
             reprompt.setOutputSpeech(repromptSpeech);
 
-            return SpeechletResponse.newAskResponse(speech, reprompt, card);
+            return SpeechletResponse.newAskResponse(speech, reprompt, createCard(speechText, posterUrl));
 
         } else {
-            return SpeechletResponse.newTellResponse(speech, card);
+            return SpeechletResponse.newTellResponse(speech, createCard(speechText, posterUrl));
         }
+    }
+
+    private SpeechletResponse getSpeechletResponse(String speechText, String repromptText,
+            boolean isAskResponse) {
+        return getSpeechletResponse(speechText, repromptText, null, isAskResponse);
+
     }
 }

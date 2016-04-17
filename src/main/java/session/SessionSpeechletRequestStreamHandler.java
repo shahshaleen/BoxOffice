@@ -34,6 +34,6 @@ public class SessionSpeechletRequestStreamHandler extends SpeechletRequestStream
     }
 
     public SessionSpeechletRequestStreamHandler() {
-        super(new SessionSpeechlet(), supportedApplicationIds);
+        super(new session.SessionSpeechlet(), supportedApplicationIds);
     }
 }
