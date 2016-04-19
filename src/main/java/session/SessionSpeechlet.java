@@ -30,10 +30,10 @@ import com.amazon.speech.ui.PlainTextOutputSpeech;
 import com.amazon.speech.ui.Reprompt;
 import com.amazon.speech.ui.SimpleCard;
 import com.amazon.speech.ui.StandardCard;
-import com.omertron.omdbapi.OMDBException;
 import com.omertron.omdbapi.OmdbApi;
 import com.omertron.omdbapi.model.OmdbVideoFull;
 import com.omertron.omdbapi.tools.OmdbBuilder;
+import com.omertron.omdbapi.OMDBException;
 
 public class SessionSpeechlet implements Speechlet {
 
@@ -123,7 +123,7 @@ public class SessionSpeechlet implements Speechlet {
     private SpeechletResponse getWelcomeResponse() {
         // Create the welcome message.
         String speechText =
-                "Welcome to Movie Ratings App. Please tell me movie name you would like to know review of."
+                "Please tell me movie name you would like to know review of."
                         + " saying, tell me review of Titanic";
         String repromptText =
                 "Please tell me movie name you would like to know review of by saying, tell me review of Titanic";
@@ -154,7 +154,6 @@ public class SessionSpeechlet implements Speechlet {
                 OmdbVideoFull omdbVideoFull = getMovieInfoFromOmdb(movieName);
                 System.out.println("OmdbVideoFull "+ omdbVideoFull);
 
-                posterUrl = omdbVideoFull.getPoster();
                 String imdbRating = getImdbRating(omdbVideoFull);
                 if ( !imdbRating.isEmpty()) {
                     speechText += imdbRating + " from IMDB";
@@ -164,6 +163,9 @@ public class SessionSpeechlet implements Speechlet {
                 if ( !rottenTomatoRating.isEmpty()) {
                     speechText +=  rottenTomatoRating + " from Rotten Tomato.";
                 }
+
+                posterUrl = omdbVideoFull.getPoster().replace("http://", "https://");
+                System.out.println("Poster URL: " + posterUrl);
                 success = 1;
             } catch (OMDBException e) {
                 speechText += "not available";
@@ -275,7 +277,8 @@ public class SessionSpeechlet implements Speechlet {
 
     private Image createPoster(String posterUrl) {
         Image poster = new Image();
-        poster.setSmallImageUrl(posterUrl.replace("http://", "https://"));
+        poster.setSmallImageUrl(posterUrl);
+        poster.setLargeImageUrl(posterUrl);
         return poster;
     }
 
@@ -283,6 +286,7 @@ public class SessionSpeechlet implements Speechlet {
         SimpleCard card = new SimpleCard();
         card.setTitle(SKILL_TITLE);
         card.setContent(speechText);
+        System.out.println("Created card without poster.");
         return card;
     }
 
@@ -294,10 +298,12 @@ public class SessionSpeechlet implements Speechlet {
         if (poster != null) {
             card.setImage(poster);
         }
+        System.out.println("Created card with poster.");
         return card;
     }
 
     private Card createCard(String speechText, String posterUrl) {
+        System.out.println("Poster URL " + posterUrl);
         if (posterUrl != null && !posterUrl.isEmpty()) {
             return createCardWithPoster(speechText, posterUrl);
         } else {
@@ -314,7 +320,7 @@ public class SessionSpeechlet implements Speechlet {
         // Create the plain text output.
         PlainTextOutputSpeech speech = new PlainTextOutputSpeech();
         speech.setText(speechText);
-
+        Card card = createCard(speechText, posterUrl);
         if (isAskResponse) {
             // Create reprompt
             PlainTextOutputSpeech repromptSpeech = new PlainTextOutputSpeech();
@@ -322,10 +328,10 @@ public class SessionSpeechlet implements Speechlet {
             Reprompt reprompt = new Reprompt();
             reprompt.setOutputSpeech(repromptSpeech);
 
-            return SpeechletResponse.newAskResponse(speech, reprompt, createCard(speechText, posterUrl));
+            return SpeechletResponse.newAskResponse(speech, reprompt, card);
 
         } else {
-            return SpeechletResponse.newTellResponse(speech, createCard(speechText, posterUrl));
+            return SpeechletResponse.newTellResponse(speech, card);
         }
     }
 
